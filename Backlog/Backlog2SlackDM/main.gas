@@ -1,0 +1,203 @@
+var SPREAD_SHEET_ID = PropertiesService.getScriptProperties().getProperty("SPREAD_SHEET_ID");
+var BACKLOG_WORKSPACE_URL = PropertiesService.getScriptProperties().getProperty("BACKLOG_WORKSPACE_URL");
+var TOKEN = PropertiesService.getScriptProperties().getProperty("SLACK_TOKEN");
+var USER_SHEET_NAME = 'userList';
+var USER_LIST_LAST_ROW = 'B1';
+
+function doPost(e) {
+  analyseBackLogNotice(e.postData.getDataAsString())
+}
+
+
+function analyseBackLogNotice(data, testFlg) {
+  var userList = getUserIDList();
+  var d = null;
+  if (testFlg) {
+    d = data;
+  } else {
+    d = JSON.parse(data);
+  }
+  
+  var commnetNo = '';
+  var body = {};
+  if (!d.notifications) {
+    return;  // お知らせ先がない場合は終了
+  }
+
+  body.actionMsg = d.createdUser.name + "さんがあなたをお知らせユーザに設定して" 
+  switch (d.type) {
+    case 1:
+      body.actionMsg += "課題を起票しました";
+      break;
+    case 2:
+      body.actionMsg += "課題を更新しました";
+      break;
+    case 3:
+      body.actionMsg += "課題にコメントしました";
+      break;
+//    case 14:
+//      body.actionMsg += "課題をまとめて更新しました";//まとめて更新時、お知らせユーザが設定できない？
+//      break;
+    default:
+      body.actionMsg = "";
+  }
+
+  body.summary = d.content.description; // 
+  if (d.content.comment) {
+    body.summary = d.content.comment.content.replace(/\n/g, ' ');
+  }
+  
+  if (body.summary && body.summary.length > 80) {
+    body.summary = body.summary.substr(0, 80) + "...(省略されたメッセージがあります)"; // 全文読まない人が出てくるので敢えて短く切る
+  }
+  body.workSpace = "";
+  if (d.project) {
+    body.workSpace = d.project.name;
+  }
+  
+  if (d.type != 14) {
+    // まとめて更新以外
+    if (d.content) {
+      if (d.content.comment) {
+        commnetNo = '#comment-' + d.content.comment.id;
+      }
+    }  
+    body.issueURL = BACKLOG_WORKSPACE_URL + d.project.projectKey + '-' + d.content.key_id + commnetNo;
+    body.issueTitle = d.project.projectKey + '-' + d.content.key_id + ' ' + d.content.summary;
+    body.assignee = "";
+    if (d.content.assignee) {
+      body.assignee = d.content.assignee.name;
+    }
+    body.priority = "";
+    if (d.content.priority) {
+      body.priority = d.content.priority.name;
+    }
+    body.dueDate = d.content.dueDate;
+
+  } else {
+//    // まとめて更新
+//    var link = [];
+//    var tmpUrl = BACKLOG_WORKSPACE_URL + d.project.projectKey + '-';
+//    if (d.content && d.content.link) {
+//      d.content.link.forEach(function(e) {
+//        link.push({
+//          "title": e.title,
+//          "url": tmpUrl + e.key_id + '#comment-' + e.comment.id
+//        });
+//      });
+//    }
+//    body.linkAry = link;
+  }
+  
+  d.notifications.forEach(function(val) {
+    var nulabID = val.user.nulabAccount.nulabId;
+    var slackID = userList[nulabID];
+    if (slackID) {
+      if (d.type != 14) {
+        sendSlackMsgCommon(slackID, body);
+      } else {
+//        sendSlackMsgPack(slackID, body);
+      }      
+    }
+  });
+}
+
+function sendSlackMsgCommon(channel, body) {
+  var url = "https://slack.com/api/chat.postMessage";
+  var payload = {
+    "token": TOKEN,
+    "channel": channel,
+    "as_user": true,
+    "text": body.actionMsg,
+    "attachments" : JSON.stringify([
+        {
+          "color": "#00FF00",
+          "title": "<" + body.issueURL + "|" + body.issueTitle + ">", // リンク表示
+          "text": ">" + body.summary,// > を先頭につけて引用文のような表示にする
+          "fields": [
+            {
+              "title": "スペース",
+              "value": body.workSpace,
+              "short": true
+            },
+//            {
+//              "title": "担当者",
+//              "value": body.assignee,
+//              "short": true
+//            },
+            {
+              "title": "優先度",
+              "value": body.priority,
+              "short": true
+            },
+//            {
+//              "title": "期限日",
+//              "value": body.dueDate,
+//              "short": true
+//            },
+          ],
+          "footer": "このDMは送信専用です。返信は各チャンネルでのメッセージ、更新者へ直接連絡、Backlogでのやり取りをお願いします。"
+        },
+    ]),
+  }; 
+  var params = {
+    "method" : "post",
+    "payload" : payload
+  };
+  var response = UrlFetchApp.fetch(url, params)
+  var j = JSON.parse(response.getContentText());
+  writeLog("RETURN : " + j["ok"]);  
+}
+
+//function sendSlackMsgPack(channel, body) {
+//  var url = "https://slack.com/api/chat.postMessage";
+//  var text = "";
+//  body.linkAry.forEach(function(e) {
+//    text += "<" + e.title + "|*" + e.url + "*>\n";
+//  });
+//  
+//  var payload = {
+//    "token": TOKEN,
+//    "channel": channel,
+//    "as_user": true,
+//    "text": text, // リンク表示
+//    "attachments" : JSON.stringify([
+//        {
+//          "color": "#00FF00",
+//          "title": body.actionMsg,
+//          "text": ">" + body.summary,// > を先頭につけて引用文のような表示にする
+//          "fields": [
+//            {
+//              "title": "スペース",
+//              "value": body.workSpace,
+//              "short": true
+//            },
+//          ],
+//          "footer": "このDMは送信専用です。返信は各チャンネルでのメッセージ、更新者へ直接連絡、Backlogでのやり取りをお願いします。"
+//        },
+//    ]),
+//  }; 
+//  var params = {
+//    "method" : "post",
+//    "payload" : payload
+//  };
+//  var response = UrlFetchApp.fetch(url, params)
+//  var j = JSON.parse(response.getContentText());
+//  writeLog("RETURN : " + j["ok"]);  
+//}
+
+// nulabID : slackMemberID のリスト生成
+function getUserIDList() {
+  var spreadSheet = SpreadsheetApp.openById(SPREAD_SHEET_ID);
+  var sheet = spreadSheet.getSheetByName(USER_SHEET_NAME);
+  var lastRow = sheet.getRange(USER_LIST_LAST_ROW).getValue();
+  var userList = [];
+  var values = sheet.getRange(2, 5, lastRow -1, 2).getValues();
+  
+  for (var i = 0; i < lastRow - 1; i++) {
+    if (values[i] !== undefined) {
+      userList[values[i][0]] = values[i][1];
+    }
+  }
+  return userList;
+}
