@@ -1,3 +1,11 @@
+# 概要
+
+- Backlogでお知らせに追加されたユーザに対してSlackでDMを送信する
+- Backlogユーザ(NulabID)とSlackユーザの紐付けはGoogleスプレッドシートで管理する
+- GAS側でWebhookURLを発行し、Backlog側で送信WebhookURLとしてGAS側で発行したURLを指定する
+
+
+# 設定内容
 ## GAS
 
 |プロパティ|値|
